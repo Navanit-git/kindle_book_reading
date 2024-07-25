@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 import ironpdf
 import fitz  # PyMuPDF
+import re
 
 app = FastAPI()
 
@@ -35,14 +36,32 @@ def convert_pdf_to_images(pdf_file, dpi=300):
             image_paths.append(filename)
     return sorted(image_paths)
 
+
+
 def extract_content_from_pdf(pdf_file):
     content = []
     try:
         doc = fitz.open(pdf_file)
         for page_num in range(len(doc)):
             page = doc[page_num]
-            text = page.get_text()
-            content.append({"text": text})
+            
+            # Extract text with more layout preservation
+            blocks = page.get_text("blocks")
+            text = ""
+            for block in blocks:
+                block_text = block[4]
+                # Replace multiple spaces with a single space
+                block_text = re.sub(r'\s+', ' ', block_text)
+                # Add two newlines after each block to preserve some layout
+                text += block_text + "\n\n"
+            
+            # Remove excessive newlines
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            
+            # Encode and decode to handle potential unicode issues
+            text = text.encode('ascii', 'ignore').decode('ascii')
+            
+            content.append({"text": text.strip()})
         return content
     except Exception as e:
         print(f"Error extracting content from PDF: {str(e)}")
@@ -90,11 +109,49 @@ def generate_text_view(file_name, pdf_file):
         <head>
             <title>PDF Text Viewer - {file_name}</title>
             <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; padding: 20px; margin: 0 auto; max-width: 800px; }}
-                h1 {{ color: #333; border-bottom: 2px solid #333; padding-bottom: 10px; }}
-                .page {{ margin-bottom: 20px; border: 1px solid #ddd; padding: 10px; }}
-                .page-number {{ font-weight: bold; margin-bottom: 10px; }}
-                .page-content {{ white-space: pre-wrap; }}
+                body {{
+                    font-family: Arial, sans-serif;
+                    line-height: 1.6;
+                    padding: 20px;
+                    margin: 0 auto;
+                    max-width: 100%;
+                    box-sizing: border-box;
+                }}
+                h1 {{
+                    color: #333;
+                    border-bottom: 2px solid #333;
+                    padding-bottom: 10px;
+                }}
+                #pdf-content {{
+                    width: 100%;
+                    max-width: 1200px;
+                    margin: 0 auto;
+                }}
+                .page {{
+                    margin-bottom: 20px;
+                    border: 1px solid #ddd;
+                    padding: 20px;
+                    background-color: #f9f9f9;
+                }}
+                .page-number {{
+                    font-weight: bold;
+                    margin-bottom: 10px;
+                    font-size: 1.2em;
+                    color: #555;
+                }}
+                .page-content {{
+                    white-space: pre-wrap;
+                    word-wrap: break-word;
+                    font-size: 16px;
+                }}
+                @media (max-width: 768px) {{
+                    body {{
+                        padding: 10px;
+                    }}
+                    .page {{
+                        padding: 10px;
+                    }}
+                }}
             </style>
         </head>
         <body>
@@ -114,7 +171,6 @@ def generate_text_view(file_name, pdf_file):
     
     with open(os.path.join(OUTPUT_DIR, f"{file_name}_text.html"), "w", encoding="utf-8") as f:
         f.write(html_content)
-
 def generate_image_view(file_name, pdf_file):
     image_paths = convert_pdf_to_images(pdf_file, dpi=300)
     
